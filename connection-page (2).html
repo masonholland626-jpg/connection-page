@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!--
+  ============================== SETUP (read this) ==============================
+  This page needs a free Firebase project to sync chat/accounts across devices.
+
+  1. Go to https://console.firebase.google.com, sign in, "Add project" (free,
+     no card needed). Any name is fine.
+  2. In the project, click "Build > Realtime Database" > "Create Database" >
+     start in TEST MODE (we'll tighten rules after).
+  3. Click the gear icon (Project settings) > scroll to "Your apps" > click
+     the </> (web) icon > register an app (no hosting needed) > copy the
+     firebaseConfig object it shows you.
+  4. Paste those values into FIREBASE_CONFIG below, replacing the placeholders.
+  5. Back in Realtime Database > Rules tab, use:
+       { "rules": { ".read": true, ".write": true } }
+     This is intentionally simple/open (see the note in chat about what that
+     means for security) — it's what makes an "anyone with the link" page
+     possible without a login system. Publish the rules, save this file, and
+     open it in a browser.
+  ================================================================================
+-->
+<script>
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCyQb580r6XcD0M95yv1MMOFaH74VO_XsA",
+    authDomain: "hfmfmmmm.firebaseapp.com",
+    databaseURL: "https://hfmfmmmm-default-rtdb.firebaseio.com/",
+    projectId: "hfmfmmmm",
+  };
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --bg:#0C0F13; --panel:#12161C; --panel-2:#171C24; --line:#232A34;
+    --text:#E6E9EE; --text-dim:#8B93A1; --accent:#5EEAD4; --accent-dim:#2E5C56;
+    --danger:#FF6B6B; --danger-dim:#4A2626; --radius:3px;
+    font-family:'Inter',-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .hidden{display:none !important;}
+  #gate{width:100%;max-width:380px;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;}
+  .brand-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+  .brand-label{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--text-dim);}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px;}
+  .card h1{font-size:18px;font-weight:600;margin:0 0 6px;}
+  .card p.sub{color:var(--text-dim);font-size:13px;margin:0 0 22px;line-height:1.5;}
+  label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:6px;font-family:'IBM Plex Mono',monospace;}
+  input[type=password],input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:var(--radius);font-size:14px;margin-bottom:16px;}
+  input:focus{outline:none;border-color:var(--accent);}
+  button{font-family:'Inter',sans-serif;font-weight:600;font-size:14px;border:none;border-radius:var(--radius);padding:10px 16px;cursor:pointer;}
+  .btn-primary{background:var(--accent);color:#06201C;width:100%;}
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--line);}
+  .btn-ghost:hover{color:var(--text);border-color:var(--text-dim);}
+  .btn-danger{background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger);}
+  .err{color:var(--danger);font-size:13px;margin:-6px 0 14px;min-height:16px;font-family:'IBM Plex Mono',monospace;}
+  #app{width:100%;max-width:960px;height:80vh;min-height:540px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);display:flex;overflow:hidden;}
+  #sidebar{width:200px;flex-shrink:0;background:var(--panel-2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 0;}
+  .side-head{padding:0 18px 18px;border-bottom:1px solid var(--line);margin-bottom:10px;}
+  .side-head .who{font-size:13px;font-weight:600;}
+  .side-head .role{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--accent);margin-top:3px;}
+  .nav-item{padding:10px 18px;font-size:13px;color:var(--text-dim);cursor:pointer;border-left:2px solid transparent;}
+  .nav-item:hover{color:var(--text);background:rgba(255,255,255,.02);}
+  .nav-item.active{color:var(--text);border-left-color:var(--accent);background:rgba(94,234,212,.06);}
+  .nav-spacer{flex:1;}
+  .nav-bottom{padding:10px 18px;}
+  .nav-bottom button{width:100%;}
+  #main{flex:1;display:flex;flex-direction:column;min-width:0;}
+  .view{flex:1;overflow-y:auto;padding:24px;display:none;flex-direction:column;}
+  .view.active{display:flex;}
+  .view h2{margin:0 0 4px;font-size:17px;}
+  .view p.sub{color:var(--text-dim);font-size:13px;margin:0 0 20px;}
+  #chat-log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:4px;}
+  .msg{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;max-width:80%;}
+  .msg.mine{align-self:flex-end;border-color:var(--accent-dim);}
+  .msg-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:4px;}
+  .msg-from{font-size:12px;font-weight:600;color:var(--accent);}
+  .msg-from.incognito{color:var(--text-dim);font-style:italic;}
+  .msg-time{font-size:11px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+  .msg-body{font-size:14px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
+  .msg-del{background:none;border:none;color:var(--text-dim);font-size:11px;cursor:pointer;padding:0;margin-top:6px;}
+  .msg-del:hover{color:var(--danger);}
+  .chat-input-row{display:flex;gap:10px;margin-top:12px;flex-shrink:0;align-items:center;}
+  .chat-input-row input[type=text]{margin:0;flex:1;}
+  .incog-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);white-space:nowrap;}
+  .empty{color:var(--text-dim);font-size:13px;text-align:center;margin:auto;font-family:'IBM Plex Mono',monospace;}
+  .admin-row{display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;}
+  .admin-name{font-size:13px;font-weight:600;}
+  .admin-meta{font-size:11px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+  .admin-row-actions{display:flex;gap:8px;}
+  .admin-row-actions button{font-size:12px;padding:6px 10px;}
+  .new-admin-box{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:22px;}
+  .new-admin-box h3{margin:0 0 12px;font-size:13px;}
+  .reveal-box{background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 14px;margin-top:12px;font-size:13px;display:none;}
+  .reveal-box.show{display:block;}
+  .pw-form{max-width:320px;}
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="brand"><div class="brand-dot"></div><div class="brand-label mono">CONNECTION</div></div>
+
+  <div id="setup-card" class="card hidden">
+    <h1>Set the owner password</h1>
+    <p class="sub">No owner account exists yet. Choose a password — it's hashed, never stored as plain text.</p>
+    <label>Owner password</label><input type="password" id="setup-pw">
+    <label>Confirm</label><input type="password" id="setup-pw2">
+    <div class="err" id="setup-err"></div>
+    <button class="btn-primary" onclick="handleSetup()">Create owner account</button>
+  </div>
+
+  <div id="login-card" class="card hidden">
+    <h1>Enter password</h1>
+    <p class="sub">Owner, admin, or member password.</p>
+    <label>Password</label>
+    <input type="password" id="login-pw" onkeydown="if(event.key==='Enter')handleLogin()">
+    <div class="err" id="login-err"></div>
+    <button class="btn-primary" onclick="handleLogin()">Connect</button>
+  </div>
+
+  <div id="loading-card" class="card">
+    <p class="sub" style="margin:0;">Connecting…</p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div id="sidebar">
+    <div class="side-head">
+      <div class="who" id="who-label">—</div>
+      <div class="role mono" id="role-label">—</div>
+    </div>
+    <div class="nav-item active" data-view="chat" onclick="showView('chat')">Chat</div>
+    <div class="nav-item" data-view="password" onclick="showView('password')">Change password</div>
+    <div class="nav-item hidden" id="nav-admins" data-view="admins" onclick="showView('admins')">Manage admins</div>
+    <div class="nav-item hidden" id="nav-members" data-view="members" onclick="showView('members')">Manage members</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-bottom"><button class="btn-ghost" onclick="logout()">Disconnect</button></div>
+  </div>
+
+  <div id="main">
+    <div class="view active" id="view-chat">
+      <h2>Chat</h2>
+      <p class="sub">Synced live across devices.</p>
+      <div id="chat-log"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Write a message…" onkeydown="if(event.key==='Enter')sendMessage()">
+        <label class="incog-toggle"><input type="checkbox" id="incog-check"> Post as Incognito</label>
+        <button class="btn-primary" style="width:auto" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+
+    <div class="view" id="view-password">
+      <h2>Change your password</h2>
+      <p class="sub">Updates only your own account.</p>
+      <div class="pw-form">
+        <label>Current password</label><input type="password" id="cp-current">
+        <label>New password</label><input type="password" id="cp-new">
+        <label>Confirm new password</label><input type="password" id="cp-new2">
+        <div class="err" id="cp-err"></div>
+        <button class="btn-primary" onclick="changeOwnPassword()">Update password</button>
+      </div>
+    </div>
+
+    <div class="view" id="view-admins">
+      <h2>Manage admins</h2>
+      <p class="sub">Admins can add/manage members and use chat. They can't create, remove, or see other admins — only you can.</p>
+      <div class="new-admin-box">
+        <h3>Add a new admin</h3>
+        <label>Name</label><input type="text" id="na-name" placeholder="e.g. Jordan">
+        <button class="btn-primary" style="width:auto" onclick="createAccount('admins')">Generate admin account</button>
+        <div class="reveal-box" id="admins-reveal"></div>
+      </div>
+      <h3 class="mono" style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">EXISTING ADMINS</h3>
+      <div id="admins-list"></div>
+    </div>
+
+    <div class="view" id="view-members">
+      <h2>Manage members</h2>
+      <p class="sub">Members can use chat and change their own password. They can't manage anyone else's account.</p>
+      <div class="new-admin-box">
+        <h3>Add a new member</h3>
+        <label>Name</label><input type="text" id="nm-name" placeholder="e.g. Sam">
+        <button class="btn-primary" style="width:auto" onclick="createAccount('members')">Generate member account</button>
+        <div class="reveal-box" id="members-reveal"></div>
+      </div>
+      <h3 class="mono" style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">EXISTING MEMBERS</h3>
+      <div id="members-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+let currentUser = null; // { role:'owner'|'admin'|'member', id, name }
+let accountsCache = { owner: null, admins: {}, members: {} };
+
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function randomPassword(len=10){
+  const chars='abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const arr=new Uint32Array(len); crypto.getRandomValues(arr);
+  let out=''; for(let i=0;i<len;i++) out+=chars[arr[i]%chars.length];
+  return out;
+}
+function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+// ---- boot: read accounts once to decide setup vs login ----
+db.ref('accounts').once('value').then(snap => {
+  accountsCache = snap.val() || { owner:null, admins:{}, members:{} };
+  document.getElementById('loading-card').classList.add('hidden');
+  if (accountsCache.owner) {
+    document.getElementById('login-card').classList.remove('hidden');
+  } else {
+    document.getElementById('setup-card').classList.remove('hidden');
+  }
+}).catch(() => {
+  document.getElementById('loading-card').querySelector('p').textContent =
+    "Couldn't reach the database. Check FIREBASE_CONFIG at the top of this file.";
+});
+
+async function handleSetup(){
+  const pw=document.getElementById('setup-pw').value, pw2=document.getElementById('setup-pw2').value;
+  const err=document.getElementById('setup-err'); err.textContent='';
+  if (pw.length<6){ err.textContent='Use at least 6 characters.'; return; }
+  if (pw!==pw2){ err.textContent="Passwords don't match."; return; }
+  const hash = await sha256Hex(pw);
+  await db.ref('accounts/owner').set({ hash });
+  currentUser = { role:'owner', id:'owner', name:'Owner' };
+  enterApp();
+}
+
+async function handleLogin(){
+  const pw=document.getElementById('login-pw').value;
+  const err=document.getElementById('login-err'); err.textContent='';
+  const hash = await sha256Hex(pw);
+  const fresh = (await db.ref('accounts').once('value')).val() || {};
+  accountsCache = fresh;
+
+  if (fresh.owner && fresh.owner.hash===hash){ currentUser={role:'owner',id:'owner',name:'Owner'}; enterApp(); return; }
+  for (const id in (fresh.admins||{})) if (fresh.admins[id].hash===hash){ currentUser={role:'admin',id,name:fresh.admins[id].name}; enterApp(); return; }
+  for (const id in (fresh.members||{})) if (fresh.members[id].hash===hash){ currentUser={role:'member',id,name:fresh.members[id].name}; enterApp(); return; }
+  err.textContent='Incorrect password.';
+}
+
+function logout(){
+  currentUser=null;
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-pw').value='';
+  document.getElementById('login-card').classList.remove('hidden');
+}
+
+function enterApp(){
+  document.querySelectorAll('#gate .card').forEach(c=>c.classList.add('hidden'));
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('who-label').textContent = currentUser.name;
+  document.getElementById('role-label').textContent = currentUser.role.toUpperCase();
+  document.getElementById('nav-admins').classList.toggle('hidden', currentUser.role!=='owner');
+  document.getElementById('nav-members').classList.toggle('hidden', currentUser.role==='member');
+  showView('chat');
+  listenChat();
+}
+
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  const item=document.querySelector('.nav-item[data-view="'+name+'"]'); if(item) item.classList.add('active');
+  if (name==='admins') renderList('admins');
+  if (name==='members') renderList('members');
+}
+
+// ---- chat (live) ----
+let chatListening=false;
+function listenChat(){
+  if (chatListening) return;
+  chatListening=true;
+  db.ref('messages').orderByChild('ts').on('value', snap => {
+    const log=document.getElementById('chat-log');
+    const msgs=[]; snap.forEach(c=>msgs.push({id:c.key,...c.val()}));
+    log.innerHTML='';
+    if (msgs.length===0){ log.innerHTML='<div class="empty">No messages yet. Say something.</div>'; return; }
+    msgs.forEach(m=>{
+      const mine = currentUser && m.authorId===currentUser.id;
+      const canDelete = mine || currentUser.role==='owner' || currentUser.role==='admin';
+      const div=document.createElement('div');
+      div.className='msg'+(mine?' mine':'');
+      const label = m.incognito ? 'Incognito' : m.name;
+      div.innerHTML = `
+        <div class="msg-head">
+          <span class="msg-from${m.incognito?' incognito':''}">${escapeHtml(label)}</span>
+          <span class="msg-time">${new Date(m.ts).toLocaleString()}</span>
+        </div>
+        <div class="msg-body">${escapeHtml(m.text)}</div>
+        ${canDelete ? `<button class="msg-del" onclick="deleteMessage('${m.id}')">Delete</button>` : ''}`;
+      log.appendChild(div);
+    });
+    log.scrollTop = log.scrollHeight;
+  });
+}
+
+function sendMessage(){
+  const input=document.getElementById('chat-input');
+  const text=input.value.trim();
+  if (!text) return;
+  const incognito = document.getElementById('incog-check').checked;
+  db.ref('messages').push({
+    name: currentUser.name, authorId: currentUser.id, text, incognito, ts: Date.now()
+  });
+  input.value='';
+}
+function deleteMessage(id){ db.ref('messages/'+id).remove(); }
+
+// ---- change own password ----
+async function changeOwnPassword(){
+  const cur=document.getElementById('cp-current').value;
+  const next=document.getElementById('cp-new').value, next2=document.getElementById('cp-new2').value;
+  const err=document.getElementById('cp-err'); err.textContent=''; err.style.color='var(--danger)';
+  const curHash=await sha256Hex(cur);
+  const path = currentUser.role==='owner' ? 'accounts/owner' :
+               currentUser.role==='admin' ? 'accounts/admins/'+currentUser.id :
+               'accounts/members/'+currentUser.id;
+  const actual=(await db.ref(path).once('value')).val();
+  if (!actual || actual.hash!==curHash){ err.textContent='Current password is incorrect.'; return; }
+  if (next.length<6){ err.textContent='New password must be at least 6 characters.'; return; }
+  if (next!==next2){ err.textContent="New passwords don't match."; return; }
+  await db.ref(path).update({ hash: await sha256Hex(next) });
+  document.getElementById('cp-current').value='';
+  document.getElementById('cp-new').value='';
+  document.getElementById('cp-new2').value='';
+  err.style.color='var(--accent)'; err.textContent='Password updated.';
+  setTimeout(()=>{err.textContent='';},2500);
+}
+
+// ---- admin/member management ----
+async function createAccount(kind){ // kind: 'admins' | 'members'
+  const nameInput = document.getElementById(kind==='admins' ? 'na-name' : 'nm-name');
+  const name = nameInput.value.trim() || (kind==='admins'?'Admin':'Member');
+  const pw = randomPassword(10);
+  await db.ref('accounts/'+kind).push({ name, hash: await sha256Hex(pw) });
+  nameInput.value='';
+  const reveal = document.getElementById(kind+'-reveal');
+  reveal.innerHTML = `Password for <b>${escapeHtml(name)}</b>:<div class="mono" style="margin-top:4px;font-size:15px;">${pw}</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Shown once — copy it now.</div>`;
+  reveal.classList.add('show');
+  renderList(kind);
+}
+
+async function renderList(kind){
+  const wrap=document.getElementById(kind+'-list');
+  const data=(await db.ref('accounts/'+kind).once('value')).val() || {};
+  const ids=Object.keys(data);
+  if (ids.length===0){ wrap.innerHTML='<div class="empty" style="margin:0;text-align:left;">None yet.</div>'; return; }
+  wrap.innerHTML='';
+  ids.forEach(id=>{
+    const a=data[id];
+    const row=document.createElement('div'); row.className='admin-row';
+    row.innerHTML = `
+      <div><div class="admin-name">${escapeHtml(a.name)}</div><div class="admin-meta">${id}</div></div>
+      <div class="admin-row-actions">
+        <button class="btn-ghost" onclick="resetPassword('${kind}','${id}')">Reset password</button>
+        <button class="btn-danger" onclick="removeAccount('${kind}','${id}')">Remove</button>
+      </div>`;
+    wrap.appendChild(row);
+  });
+}
+
+async function resetPassword(kind,id){
+  const pw=randomPassword(10);
+  await db.ref('accounts/'+kind+'/'+id).update({ hash: await sha256Hex(pw) });
+  const snap=(await db.ref('accounts/'+kind+'/'+id).once('value')).val();
+  const reveal=document.getElementById(kind+'-reveal');
+  reveal.innerHTML = `Password for <b>${escapeHtml(snap.name)}</b> (reset):<div class="mono" style="margin-top:4px;font-size:15px;">${pw}</div>`;
+  reveal.classList.add('show');
+}
+async function removeAccount(kind,id){
+  await db.ref('accounts/'+kind+'/'+id).remove();
+  renderList(kind);
+}
+</script>
+</body>
+</html>
